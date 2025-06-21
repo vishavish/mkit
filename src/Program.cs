@@ -1,55 +1,97 @@
-﻿using HtmlAgilityPack;
+﻿using System.Text.RegularExpressions;
+using HtmlAgilityPack;
 using PuppeteerSharp;
 
 HttpClient http = new();
 
-var x = await GetSearchResults("crazy demon");
-
-foreach (var manga in x)
+if (args.Length > 0)
 {
-	Console.WriteLine("Manga Information: ");
-	Console.WriteLine($"Name: { manga.Name }");
-	Console.WriteLine($"Url: { manga.Url }");
-	Console.WriteLine($"Chapter(s): { manga.Chapters }");
-	Console.WriteLine();
+	var results = await GetSearchResults(args[0]);
+
+	foreach (var manga in results)
+	{
+		Console.WriteLine("Manga Information: ");
+		Console.WriteLine($"Name: { manga.Name }");
+		Console.WriteLine($"Url: { manga.Url }");
+		Console.WriteLine($"Chapter(s): { manga.Chapters }");
+		Console.WriteLine();
+	}
+	
+	Console.WriteLine("Enter URL: ");
+	var url = Console.ReadLine();
+	Console.Clear();
+	var chapterList = await GetChapterList(url!);
+	foreach(var chapterInfo in chapterList)
+	{
+		Console.WriteLine(chapterInfo.Id);
+	}
+	
+	Console.WriteLine("NOTE: You can include different chapters using [,] or a range using [-].");
+	Console.WriteLine("Example: \n[1,5,10] this will download chapters 1, 5, and 10.");
+	Console.WriteLine("[1-10] this will download chapters 1 to 10.");
+	Console.Write("Enter chapters: ");
+	var chapterUrl = Console.ReadLine();
+	var input = ParseInput(chapterUrl!);
+	
+	Console.WriteLine(input.mode);
+	Console.WriteLine(input.collection);
+	
+	// await DownloadChapters(chapterUrl!);
+	
+	Console.ReadLine();
 }
 
-// await GetChapterList("https://mangakatana.com/manga/the-return-of-the-crazy-demon.25882");
-// await DownloadChapters();
 
-async Task GetChapterList(string url)
+/* *************************** */
+/*          FUNCTIONS          */
+/*                             */
+/* *************************** */
+
+(Mode mode, int[] collection) ParseInput(string input)
 {
-	Console.WriteLine("Please while we connect and retrieve data from the site...");
+	if (input.IndexOf(',') >= 0)
+	{
+		var x = input.Split(',');
+		return (Mode.Selection, x.Select(int.Parse).ToArray());
+	}
+	else
+	{
+		var x = input.Split('-');
+		return (Mode.Selection, x.Select(int.Parse).ToArray());
+	}
 
-	// https://mangakatana.com/manga/the-return-of-the-crazy-demon.25882
+}
+
+async Task<List<ChapterInfo>> GetChapterList(string url)
+{
+	List<ChapterInfo> chapterList = new();
+	Console.WriteLine("Please wait while we connect and retrieve data from the site...");
+
+	//https://mangakatana.com/manga/the-return-of-the-crazy-demon.25882
  
 	await new BrowserFetcher().DownloadAsync();
 	using var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
 	using var page = await browser.NewPageAsync();
 	await page.GoToAsync(url); 
-	
 	string content = await page.GetContentAsync();
-	
 	var htmlDoc = new HtmlDocument();
 	htmlDoc.LoadHtml(content);
 	
-	var nodes = htmlDoc.DocumentNode
-		.SelectNodes("//div[@class='chapters']//div[@class='chapter']");
-	
-	Console.WriteLine(nodes!.Count);
+	var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@class='chapters']//div[@class='chapter']");
 	
 	foreach (var node in nodes!)
 	{
 		string name = node.SelectSingleNode("a")!.InnerText;
-		// string chapters = node.SelectSingleNode("span")!.InnerText.Replace('-', ' ').Trim();
 		string mangaUrl = node.SelectSingleNode("a")!.GetAttributeValue("href", "N/A");
-	
-		Console.WriteLine(name);
-		Console.WriteLine(mangaUrl);
+		
+		// TODO:: Validate here; but okay for now
+		int.TryParse(Regex.Replace(name, @"\D", ""), out int res);
+		
+		chapterList.Add(new ChapterInfo(res, mangaUrl));
 	}
-	
-}
 
+	return chapterList;
+}
 
 async Task<List<Manga>> GetSearchResults(string searchTerm)
 {
@@ -67,8 +109,7 @@ async Task<List<Manga>> GetSearchResults(string searchTerm)
 	var htmlDoc = new HtmlDocument();
 	htmlDoc.LoadHtml(htmlResult);
 	
-	var nodes = htmlDoc.DocumentNode
-		.SelectNodes("//div[@id='book_list']//div[@class='item']//h3");
+	var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@id='book_list']//div[@class='item']//h3");
 		
 	foreach (var node in nodes!)
 	{
@@ -83,13 +124,47 @@ async Task<List<Manga>> GetSearchResults(string searchTerm)
 }
 
 
-async Task DownloadChapters()
+async Task DownloadChapters(string url)
 {
-	HttpClient http = new HttpClient();
+	await new BrowserFetcher().DownloadAsync();
+	using var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
+	using var page = await browser.NewPageAsync();
+	await page.GoToAsync(url); 
+	
+	string htmlResult = await page.GetContentAsync();
+	
+	var htmlDoc = new HtmlDocument();
+	htmlDoc.LoadHtml(htmlResult);
+	
+	var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@id='imgs']//div[contains(@class, 'wrap_img')]");
+		
+	foreach (var node in nodes!)
+	{
+		 // string name = node.SelectSingleNode("a")!.InnerText;
+		 // string chapters = node.SelectSingleNode("span")!.InnerText.Replace('-', ' ').Trim();
+		 // string mangaUrl = node.SelectSingleNode("img")!.GetAttributeValue("src", "N/A");
+		
+		 Console.WriteLine(node.SelectSingleNode("img")!.GetAttributeValue("data-src", "No"));
+	}
+			
+	// DOWNLOAD IMAGE	
 
-	var res = await http.GetAsync("https://i6.mangakatana.com/token/db4dd62c30106067941pp%3At%3A821.r16p2p-8c1p0w%3Ar%3A1p1%3A9q1q8851260/0.jpg");
-	byte[] bytes = await res.Content.ReadAsByteArrayAsync();
-	await File.WriteAllBytesAsync(Path.Combine(Environment.CurrentDirectory, "image.jpg"), bytes);
+	// var res = await http.GetAsync(url);
+	// byte[] bytes = await res.Content.ReadAsByteArrayAsync();
+	// await File.WriteAllBytesAsync(Path.Combine(Environment.CurrentDirectory, "image.jpg"), bytes);
 }
 
+/* *************************** */
+/*   CLASSES, RECORDS, ENUMS   */
+/*                             */
+/* *************************** */
+
 record Manga(string Name, string Url, string Chapters);
+
+record ChapterInfo(int Id, string Url);
+
+enum Mode
+{
+	Selection,
+	Range
+}
