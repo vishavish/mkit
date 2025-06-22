@@ -33,10 +33,10 @@ if (args.Length > 0)
 	var chapterUrl = Console.ReadLine();
 	var input = ParseInput(chapterUrl!);
 	
-	Console.WriteLine(input.mode);
-	Console.WriteLine(input.collection);
+	var z = chapterList.Where(c => input.collection.Contains(c.Id));
 	
-	// await DownloadChapters(chapterUrl!);
+	foreach (var x in z)
+		await DownloadChapters(x);
 	
 	Console.ReadLine();
 }
@@ -57,7 +57,10 @@ if (args.Length > 0)
 	else
 	{
 		var x = input.Split('-');
-		return (Mode.Selection, x.Select(int.Parse).ToArray());
+		int.TryParse(x[0], out int open);
+		int.TryParse(x[1], out int close);
+		
+		return (Mode.Selection, Enumerable.Range(open, close - open + 1).ToArray());
 	}
 
 }
@@ -124,12 +127,12 @@ async Task<List<Manga>> GetSearchResults(string searchTerm)
 }
 
 
-async Task DownloadChapters(string url)
+async Task DownloadChapters(ChapterInfo chapter)
 {
 	await new BrowserFetcher().DownloadAsync();
 	using var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
 	using var page = await browser.NewPageAsync();
-	await page.GoToAsync(url); 
+	await page.GoToAsync(chapter.Url); 
 	
 	string htmlResult = await page.GetContentAsync();
 	
@@ -138,20 +141,18 @@ async Task DownloadChapters(string url)
 	
 	var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@id='imgs']//div[contains(@class, 'wrap_img')]");
 		
-	foreach (var node in nodes!)
-	{
-		 // string name = node.SelectSingleNode("a")!.InnerText;
-		 // string chapters = node.SelectSingleNode("span")!.InnerText.Replace('-', ' ').Trim();
-		 // string mangaUrl = node.SelectSingleNode("img")!.GetAttributeValue("src", "N/A");
 		
-		 Console.WriteLine(node.SelectSingleNode("img")!.GetAttributeValue("data-src", "No"));
+	for (int i = 0; i < nodes?.Count; i++)	
+	{
+		var imgUrl = nodes[i].SelectSingleNode("img")!.GetAttributeValue("data-src", "No");
+		
+		var res = await http.GetAsync(imgUrl);
+		string fileName = i + ".jpg";
+		byte[] bytes = await res.Content.ReadAsByteArrayAsync();
+		var path = Path.Combine(Environment.CurrentDirectory, "chapters_" + chapter.Id);
+		if (!Directory.Exists(path)) Directory.CreateDirectory(path);
+		await File.WriteAllBytesAsync(Path.Combine(path, fileName), bytes);
 	}
-			
-	// DOWNLOAD IMAGE	
-
-	// var res = await http.GetAsync(url);
-	// byte[] bytes = await res.Content.ReadAsByteArrayAsync();
-	// await File.WriteAllBytesAsync(Path.Combine(Environment.CurrentDirectory, "image.jpg"), bytes);
 }
 
 /* *************************** */
