@@ -1,45 +1,57 @@
 ﻿using System.Text.RegularExpressions;
 using HtmlAgilityPack;
 using PuppeteerSharp;
+using Spectre.Console;
+
 
 HttpClient http = new();
+List<Manga> results = new();
 
-if (args.Length > 0)
+var name = AnsiConsole.Prompt(new TextPrompt<string>("Enter manga name: "));
+var rule = new Rule();
+
+await AnsiConsole.Status()
+	.Spinner(Spinner.Known.Dots)
+	.SpinnerStyle(Style.Parse("green dim"))
+	.StartAsync("Connecting to server...", async ctx => {
+		results = await GetSearchResults(name.Trim());
+	});
+	
+rule.RuleStyle("bold blue");
+AnsiConsole.Write(rule);
+
+foreach (var manga in results)
 {
-	var results = await GetSearchResults(args[0]);
-
-	foreach (var manga in results)
-	{
-		Console.WriteLine("Manga Information: ");
-		Console.WriteLine($"Name: { manga.Name }");
-		Console.WriteLine($"Url: { manga.Url }");
-		Console.WriteLine($"Chapter(s): { manga.Chapters }");
-		Console.WriteLine();
-	}
-	
-	Console.WriteLine("Enter URL: ");
-	var url = Console.ReadLine();
-	Console.Clear();
-	var chapterList = await GetChapterList(url!);
-	foreach(var chapterInfo in chapterList)
-	{
-		Console.WriteLine(chapterInfo.Id);
-	}
-	
-	Console.WriteLine("NOTE: You can include different chapters using [,] or a range using [-].");
-	Console.WriteLine("Example: \n[1,5,10] this will download chapters 1, 5, and 10.");
-	Console.WriteLine("[1-10] this will download chapters 1 to 10.");
-	Console.Write("Enter chapters: ");
-	var chapterUrl = Console.ReadLine();
-	var input = ParseInput(chapterUrl!);
-	
-	var z = chapterList.Where(c => input.collection.Contains(c.Id));
-	
-	foreach (var x in z)
-		await DownloadChapters(x);
-	
-	Console.ReadLine();
+	Console.WriteLine("Manga Information: ");
+	Console.WriteLine($"Name: { manga.Name }");
+	Console.WriteLine($"Url: { manga.Url }");
+	Console.WriteLine($"Chapter(s): { manga.Chapters }");
+	Console.WriteLine();
 }
+
+Console.WriteLine("Enter URL: ");
+var url = Console.ReadLine();
+Console.Clear();
+var chapterList = await GetChapterList(url!);
+foreach(var chapterInfo in chapterList)
+{
+	Console.WriteLine(chapterInfo.Id);
+}
+
+Console.WriteLine("NOTE: You can include different chapters using [,] or a range using [-].");
+Console.WriteLine("Example: \n[1,5,10] this will download chapters 1, 5, and 10.");
+Console.WriteLine("[1-10] this will download chapters 1 to 10.");
+Console.Write("Enter chapters: ");
+var chapterUrl = Console.ReadLine();
+var input = ParseInput(chapterUrl!);
+
+var z = chapterList.Where(c => input.Contains(c.Id));
+
+foreach (var x in z)
+	await DownloadChapters(x);
+
+Console.ReadLine();
+
 
 
 /* *************************** */
@@ -47,22 +59,26 @@ if (args.Length > 0)
 /*                             */
 /* *************************** */
 
-(Mode mode, int[] collection) ParseInput(string input)
+int[] ParseInput(string input)
 {
-	if (input.IndexOf(',') >= 0)
+	if (input.Contains(','))
 	{
 		var x = input.Split(',');
-		return (Mode.Selection, x.Select(int.Parse).ToArray());
+		return x.Select(int.Parse).ToArray();
 	}
-	else
+	else if(input.Contains('-'))
 	{
 		var x = input.Split('-');
 		int.TryParse(x[0], out int open);
 		int.TryParse(x[1], out int close);
 		
-		return (Mode.Selection, Enumerable.Range(open, close - open + 1).ToArray());
+		return Enumerable.Range(open, close - open + 1).ToArray();
 	}
-
+	else
+	{
+		int.TryParse(input, out int res);
+		return new int[]{res};
+	}
 }
 
 async Task<List<ChapterInfo>> GetChapterList(string url)
