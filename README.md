@@ -1,7 +1,9 @@
  # mkit
 
-**mkit** is a tool to search and download manga in [MangaKatana](https://mangakatana.com/).
+**mkit** is a tool to search and download manga from [MangaKatana](https://mangakatana.com/).
 
+> [!WARNING]
+> This project is under heavy development.
 
 ## Building
 
