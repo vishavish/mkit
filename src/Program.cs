@@ -1,14 +1,18 @@
-﻿using System.Text.RegularExpressions;
-using HtmlAgilityPack;
+﻿using HtmlAgilityPack;
 using PuppeteerSharp;
 using Spectre.Console;
+using System.Linq;
 
 
 HttpClient http = new();
 List<Manga> results = new();
+List<ChapterInfo> chapterList = new();
+
+AnsiConsole.Write(new FigletText("Welcome to mkit!").Centered().Color(Color.SkyBlue1));
 
 var name = AnsiConsole.Prompt(new TextPrompt<string>("Enter manga name: "));
-var rule = new Rule();
+var rule = new Rule().RuleStyle(Style.Parse("blue"));
+AnsiConsole.Write(rule);
 
 await AnsiConsole.Status()
 	.Spinner(Spinner.Known.Dots)
@@ -16,42 +20,64 @@ await AnsiConsole.Status()
 	.StartAsync("Connecting to server...", async ctx => {
 		results = await GetSearchResults(name.Trim());
 	});
+
+
+AnsiConsole.Markup("[bold yellow]Search Results:[/]");
+var selected = AnsiConsole.Prompt(
+     new SelectionPrompt<string>()
+        .Title("[green]<enter>[/] to accept)")
+		.EnableSearch()
+        .AddChoices(results.Select(x => x.Name))
+);
+
+var mangaInfo = await GetMangaInfo(GetUrl(selected));
+
+AnsiConsole.Write(new Panel(new Text(selected).Centered())
+	.Expand()
+	.SquareBorder()
+);
+
+// if (results is not null)
+// {
 	
-rule.RuleStyle("bold blue");
-AnsiConsole.Write(rule);
+// 	AnsiConsole.Markup("[bold yellow]User PATH Entries:[/]");
+// 	var selected = AnsiConsole.Prompt(
+// 	     new SelectionPrompt<string>()
+// 	        .Title("[green]<enter>[/] to accept)")
+// 			.EnableSearch()
+// 	        .AddChoices(results.Select(x => x.Name))
+// 	);
 
-foreach (var manga in results)
-{
-	Console.WriteLine("Manga Information: ");
-	Console.WriteLine($"Name: { manga.Name }");
-	Console.WriteLine($"Url: { manga.Url }");
-	Console.WriteLine($"Chapter(s): { manga.Chapters }");
-	Console.WriteLine();
-}
+// 	AnsiConsole.Write(new Panel(new Text("Sample").Centered())
+// 		.Expand()
+// 		.SquareBorder()
+// 	);
 
-Console.WriteLine("Enter URL: ");
-var url = Console.ReadLine();
-Console.Clear();
-var chapterList = await GetChapterList(url!);
-foreach(var chapterInfo in chapterList)
-{
-	Console.WriteLine(chapterInfo.Id);
-}
 
-Console.WriteLine("NOTE: You can include different chapters using [,] or a range using [-].");
-Console.WriteLine("Example: \n[1,5,10] this will download chapters 1, 5, and 10.");
-Console.WriteLine("[1-10] this will download chapters 1 to 10.");
-Console.Write("Enter chapters: ");
-var chapterUrl = Console.ReadLine();
-var input = ParseInput(chapterUrl!);
+// 	await AnsiConsole.Status()
+// 		.Spinner(Spinner.Known.Dots)
+// 		.SpinnerStyle(Style.Parse("green dim"))
+// 		.StartAsync("Please wait while we connect and retrieve data from the site...", async ctx => {
+// 			chapterList = await GetChapterList(GetUrl(selected));
+// 		});
 
-var z = chapterList.Where(c => input.Contains(c.Id));
+// 	AnsiConsole.Write("Select Chapters: ");
+// 	AnsiConsole.Prompt(
+// 		new MultiSelectionPrompt<string>()
+// 		// .Title("")
+// 		.PageSize(10)
+// 		.NotRequired()
+// 	    .InstructionsText(
+// 	        "[grey](Press [blue]<space>[/] to select a chapter, " +
+// 	        "[green]<enter>[/] to accept)[/]")
+// 		.AddChoiceGroup<string>("Chapters", chapterList.Select(c => c.ChapterName))
+// 	);
+// }
 
-foreach (var x in z)
-	await DownloadChapters(x);
+// foreach (var x in z)
+// 	await DownloadChapters(x);
 
-Console.ReadLine();
-
+// Console.ReadLine();
 
 
 /* *************************** */
@@ -59,58 +85,7 @@ Console.ReadLine();
 /*                             */
 /* *************************** */
 
-int[] ParseInput(string input)
-{
-	if (input.Contains(','))
-	{
-		var x = input.Split(',');
-		return x.Select(int.Parse).ToArray();
-	}
-	else if(input.Contains('-'))
-	{
-		var x = input.Split('-');
-		int.TryParse(x[0], out int open);
-		int.TryParse(x[1], out int close);
-		
-		return Enumerable.Range(open, close - open + 1).ToArray();
-	}
-	else
-	{
-		int.TryParse(input, out int res);
-		return new int[]{res};
-	}
-}
-
-async Task<List<ChapterInfo>> GetChapterList(string url)
-{
-	List<ChapterInfo> chapterList = new();
-	Console.WriteLine("Please wait while we connect and retrieve data from the site...");
-
-	//https://mangakatana.com/manga/the-return-of-the-crazy-demon.25882
- 
-	await new BrowserFetcher().DownloadAsync();
-	using var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
-	using var page = await browser.NewPageAsync();
-	await page.GoToAsync(url); 
-	string content = await page.GetContentAsync();
-	var htmlDoc = new HtmlDocument();
-	htmlDoc.LoadHtml(content);
-	
-	var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@class='chapters']//div[@class='chapter']");
-	
-	foreach (var node in nodes!)
-	{
-		string name = node.SelectSingleNode("a")!.InnerText;
-		string mangaUrl = node.SelectSingleNode("a")!.GetAttributeValue("href", "N/A");
-		
-		// TODO:: Validate here; but okay for now
-		int.TryParse(Regex.Replace(name, @"\D", ""), out int res);
-		
-		chapterList.Add(new ChapterInfo(res, mangaUrl));
-	}
-
-	return chapterList;
-}
+string GetUrl(string selected) => results.Find(r => r.Name == selected)!.Url;
 
 async Task<List<Manga>> GetSearchResults(string searchTerm)
 {
@@ -142,6 +117,63 @@ async Task<List<Manga>> GetSearchResults(string searchTerm)
 	return mangaList;
 }
 
+async Task<MangaInfo?> GetMangaInfo(string url)
+{
+	string altName = "";
+	string authors = "";
+	string newChap = "";
+	string status = "";
+	string lastUpdate = "";
+
+	var res = await http.GetAsync(url);
+	if (!res.IsSuccessStatusCode)
+	{
+		Console.WriteLine("Failed to search for manga");
+		return null;
+	}
+	
+	string htmlResult = await res.Content.ReadAsStringAsync();
+	var htmlDoc = new HtmlDocument();
+	htmlDoc.LoadHtml(htmlResult);
+	var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@class='info']//ul[contains(@class, 'meta')]");
+	foreach (var node in nodes!)
+	{
+		altName = node!.SelectSingleNode("//div[@class='alt_name']")!.InnerText;
+		authors = node!.SelectSingleNode("//div[contains(@class,'authors')]")!.InnerText;
+		newChap = node!.SelectSingleNode("//div[contains(@class,'new_chap')]")!.InnerText;
+		status = node!.SelectSingleNode("//div[contains(@class,'status')]")!.InnerText;
+		lastUpdate = node!.SelectSingleNode("//div[contains(@class,'updateAt')]")!.InnerText;
+	}
+
+	return new MangaInfo(altName, authors, status, newChap, lastUpdate);
+}
+
+async Task<List<ChapterInfo>> GetChapterList(string url)
+{
+	List<ChapterInfo> chapterList = new();
+	//https://mangakatana.com/manga/the-return-of-the-crazy-demon.25882
+ 
+	await new BrowserFetcher().DownloadAsync();
+	using var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
+	using var page = await browser.NewPageAsync();
+	await page.GoToAsync(url); 
+	string content = await page.GetContentAsync();
+	var htmlDoc = new HtmlDocument();
+	htmlDoc.LoadHtml(content);
+	
+	var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@class='chapters']//div[@class='chapter']");
+	int i = 1;
+	foreach (var node in nodes!)
+	{
+		string name = node.SelectSingleNode("a")!.InnerText;
+		string mangaUrl = node.SelectSingleNode("a")!.GetAttributeValue("href", "N/A");
+
+		chapterList.Add(new ChapterInfo(i, name, mangaUrl));
+		i++;
+	}
+
+	return chapterList;
+}
 
 async Task DownloadChapters(ChapterInfo chapter)
 {
@@ -177,11 +209,6 @@ async Task DownloadChapters(ChapterInfo chapter)
 /* *************************** */
 
 record Manga(string Name, string Url, string Chapters);
+record MangaInfo(string AltName, string Authors, string Status, string LatestChap, string LastUpdated);
+record ChapterInfo(int Id, string ChapterName, string Url);
 
-record ChapterInfo(int Id, string Url);
-
-enum Mode
-{
-	Selection,
-	Range
-}
