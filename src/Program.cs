@@ -1,7 +1,6 @@
 ﻿using HtmlAgilityPack;
 using PuppeteerSharp;
 using Spectre.Console;
-// using System.Linq;
 
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -33,9 +32,11 @@ var selected = AnsiConsole.Prompt(
 );
 
 var mangaInfo = await GetMangaInfo(GetUrl(selected));
-AnsiConsole.Write(new Panel(new Text(selected).Centered())
+AnsiConsole.Write(new Panel(new Text(selected.ToUpperInvariant(),
+                            new Style(Color.Red)).Centered())
     .Expand()
     .SquareBorder()
+    .BorderColor(Color.SkyBlue1)
 );
 
 
@@ -46,26 +47,34 @@ var layout = new Layout("Root")
         new Layout("Right")
     );
 
+Markup status = mangaInfo!.Status switch
+{
+
+    "Completed" => new Markup($"Status         : :green_circle: {mangaInfo!.Status}"),
+    "Ongoing"   => new Markup($"Status         : :blue_circle: {mangaInfo!.Status}"),
+    _           => new Markup($"Status         : :red_circle: {mangaInfo!.Status}")
+};
+
 layout["right"].Update(
     new Panel(
         new Rows(
-            new Text($"INFORMATION"),
+            new Text("INFORMATION"),
             new Text($"Alt Name       : {mangaInfo!.AltName}"),
             new Text($"Authors        : {mangaInfo!.Authors}"),
-            new Text($"Status         : {mangaInfo!.Status}"),
+            status,
             new Text($"Latest Chapter : {mangaInfo!.LatestChap}"),
             new Text($"Last Updated   : {mangaInfo!.LastUpdated}")
         )
-    )
+    ).BorderColor(Color.SkyBlue1)
 );
 
 layout["left"].Update(
     new Panel(
         new Rows(
-            new Text($"SUMMARY"),
+            new Text("SUMMARY"),
             new Text($"{mangaInfo.Description}")
         )
-    )
+    ).BorderColor(Color.SkyBlue1)
 );
 
 AnsiConsole.Write(layout);
@@ -99,17 +108,14 @@ switch (action)
             .AddChoiceGroup(chapterAll, chapterList)
         );
 
-        if (selections.Contains(chapterAll)) { AnsiConsole.Write("Select ALL"); }
+        if (selections.Count > 0) { await Task.WhenAll(selections.Select(async c => await DownloadChapters(c))); }
 
         break;
     case Action.Back:
         break;
 }
-// foreach (var x in z)
-// 	await DownloadChapters(x);
-// 
 
-// Console.ReadLine();
+Console.ReadLine();
 
 
 /* *************************** */
@@ -212,7 +218,7 @@ async Task<List<ChapterInfo>> GetChapterList(string url)
     return chapterList;
 }
 
-async Task DownloadChapters(ChapterInfo chapter)
+async Task<bool> DownloadChapters(ChapterInfo chapter)
 {
     using var page = await browser.NewPageAsync();
     await page.GoToAsync(chapter.Url);
@@ -222,18 +228,22 @@ async Task DownloadChapters(ChapterInfo chapter)
     htmlDoc.LoadHtml(htmlResult);
 
     var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@id='imgs']//div[contains(@class, 'wrap_img')]");
+    if (nodes is null) { return false; }
 
     for (int i = 0; i < nodes?.Count; i++)
     {
-        var imgUrl = nodes[i].SelectSingleNode("img")!.GetAttributeValue("data-src", "No");
+        var imgUrl = nodes[i].SelectSingleNode("img")!.GetAttributeValue("data-src", "");
+        if (string.IsNullOrEmpty(imgUrl)) { return false; }
 
         var res = await http.GetAsync(imgUrl);
         string fileName = i + ".jpg";
         byte[] bytes = await res.Content.ReadAsByteArrayAsync();
-        var path = Path.Combine(Environment.CurrentDirectory, "chapters_" + chapter.ChapterName);
+        var path = Path.Combine(Environment.CurrentDirectory, chapter.ChapterName);
         if (!Directory.Exists(path)) Directory.CreateDirectory(path);
         await File.WriteAllBytesAsync(Path.Combine(path, fileName), bytes);
     }
+
+    return true;
 }
 
 /* *************************** */
