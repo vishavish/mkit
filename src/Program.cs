@@ -1,26 +1,24 @@
 ﻿using HtmlAgilityPack;
 using PuppeteerSharp;
 using Spectre.Console;
-using System.Linq;
+// using System.Linq;
 
 
 HttpClient http = new();
 List<Manga> results = new();
 List<ChapterInfo> chapterList = new();
+await new BrowserFetcher().DownloadAsync();
 
 AnsiConsole.Write(new FigletText("Welcome to mkit!").Centered().Color(Color.SkyBlue1));
 
 var name = AnsiConsole.Prompt(new TextPrompt<string>("Enter manga name: "));
-var rule = new Rule().RuleStyle(Style.Parse("blue"));
-AnsiConsole.Write(rule);
 
 await AnsiConsole.Status()
 	.Spinner(Spinner.Known.Dots)
 	.SpinnerStyle(Style.Parse("green dim"))
-	.StartAsync("Connecting to server...", async ctx => {
+	.StartAsync("Searching for results...", async ctx => {
 		results = await GetSearchResults(name.Trim());
 	});
-
 
 AnsiConsole.Markup("[bold yellow]Search Results:[/]");
 var selected = AnsiConsole.Prompt(
@@ -31,51 +29,78 @@ var selected = AnsiConsole.Prompt(
 );
 
 var mangaInfo = await GetMangaInfo(GetUrl(selected));
-
 AnsiConsole.Write(new Panel(new Text(selected).Centered())
 	.Expand()
 	.SquareBorder()
 );
+var layout = new Layout("Root")
+	.SplitColumns(
+		new Layout("Left"),
+		new Layout("Right")
+	);
 
-// if (results is not null)
-// {
-	
-// 	AnsiConsole.Markup("[bold yellow]User PATH Entries:[/]");
-// 	var selected = AnsiConsole.Prompt(
-// 	     new SelectionPrompt<string>()
-// 	        .Title("[green]<enter>[/] to accept)")
-// 			.EnableSearch()
-// 	        .AddChoices(results.Select(x => x.Name))
-// 	);
+layout["right"].Update(
+	new Panel(
+		new Rows(
+			new Text($"INFORMATION    : "),
+			new Text($"Alt Name       : {mangaInfo!.AltName}"),
+			new Text($"Authors        : {mangaInfo!.Authors}"),
+			new Text($"Status         : {mangaInfo!.Status}"),
+			new Text($"Latest Chapter : {mangaInfo!.LatestChap}"),
+			new Text($"Last Updated   : {mangaInfo!.LastUpdated}")
+		)
+	)
+);
 
-// 	AnsiConsole.Write(new Panel(new Text("Sample").Centered())
-// 		.Expand()
-// 		.SquareBorder()
-// 	);
+layout["left"].Update(
+	new Panel(
+		new Rows(
+			new Text($"SUMMARY: "),
+			new Text($"{mangaInfo.Description}")
+		)
+	)
+);
 
+AnsiConsole.Write(layout);
+Console.WriteLine();
+var action = AnsiConsole.Prompt(
+	new SelectionPrompt<Action>()
+		.Title("[green]ENTER to accept:[/]")
+		.AddChoices(Action.Continue, Action.Back)
+);
 
-// 	await AnsiConsole.Status()
-// 		.Spinner(Spinner.Known.Dots)
-// 		.SpinnerStyle(Style.Parse("green dim"))
-// 		.StartAsync("Please wait while we connect and retrieve data from the site...", async ctx => {
-// 			chapterList = await GetChapterList(GetUrl(selected));
-// 		});
+switch (action)
+{
+	case Action.Continue:
+		await AnsiConsole.Status()
+			.Spinner(Spinner.Known.Dots)
+			.SpinnerStyle(Style.Parse("green dim"))
+			.StartAsync("Retrieving data from the site...", async ctx => {
+				chapterList = await GetChapterList(GetUrl(selected));
+			});
 
-// 	AnsiConsole.Write("Select Chapters: ");
-// 	AnsiConsole.Prompt(
-// 		new MultiSelectionPrompt<string>()
-// 		// .Title("")
-// 		.PageSize(10)
-// 		.NotRequired()
-// 	    .InstructionsText(
-// 	        "[grey](Press [blue]<space>[/] to select a chapter, " +
-// 	        "[green]<enter>[/] to accept)[/]")
-// 		.AddChoiceGroup<string>("Chapters", chapterList.Select(c => c.ChapterName))
-// 	);
-// }
+		var chapterAll = new ChapterInfo(0, "Select All", "");
+		AnsiConsole.Write("Select Chapters: ");
+		var selections = AnsiConsole.Prompt(
+			new MultiSelectionPrompt<ChapterInfo>()
+			.PageSize(10)
+			.NotRequired()
+		    .InstructionsText(
+		        "[grey](Press [blue]<space>[/] to select a chapter, " +
+		        "[green]<enter>[/] to accept)[/]")
+			.UseConverter(c => c.ChapterName)
+			.AddChoiceGroup(chapterAll, chapterList)
+		);
 
+		if (selections.Contains(chapterAll)) { AnsiConsole.Write("Select ALL");}
+
+		break;
+	case Action.Back:
+		break;
+}
 // foreach (var x in z)
 // 	await DownloadChapters(x);
+// 
 
 // Console.ReadLine();
 
@@ -119,10 +144,11 @@ async Task<List<Manga>> GetSearchResults(string searchTerm)
 
 async Task<MangaInfo?> GetMangaInfo(string url)
 {
-	string altName = "";
-	string authors = "";
-	string newChap = "";
-	string status = "";
+	string altName    = "";
+	string authors    = "";
+	string desc       = "";
+	string newChap    = "";
+	string status     = "";
 	string lastUpdate = "";
 
 	var res = await http.GetAsync(url);
@@ -131,10 +157,10 @@ async Task<MangaInfo?> GetMangaInfo(string url)
 		Console.WriteLine("Failed to search for manga");
 		return null;
 	}
-	
 	string htmlResult = await res.Content.ReadAsStringAsync();
 	var htmlDoc = new HtmlDocument();
 	htmlDoc.LoadHtml(htmlResult);
+
 	var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@class='info']//ul[contains(@class, 'meta')]");
 	foreach (var node in nodes!)
 	{
@@ -144,8 +170,13 @@ async Task<MangaInfo?> GetMangaInfo(string url)
 		status = node!.SelectSingleNode("//div[contains(@class,'status')]")!.InnerText;
 		lastUpdate = node!.SelectSingleNode("//div[contains(@class,'updateAt')]")!.InnerText;
 	}
+	nodes = htmlDoc.DocumentNode.SelectNodes("//div[@class='summary']");
+	if (nodes!.Count > 0)
+	{
+		desc = nodes![0].SelectSingleNode("p")!.InnerText;
+	}
 
-	return new MangaInfo(altName, authors, status, newChap, lastUpdate);
+	return new MangaInfo(altName, authors, desc, status, newChap, lastUpdate);
 }
 
 async Task<List<ChapterInfo>> GetChapterList(string url)
@@ -153,10 +184,10 @@ async Task<List<ChapterInfo>> GetChapterList(string url)
 	List<ChapterInfo> chapterList = new();
 	//https://mangakatana.com/manga/the-return-of-the-crazy-demon.25882
  
-	await new BrowserFetcher().DownloadAsync();
 	using var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
 	using var page = await browser.NewPageAsync();
 	await page.GoToAsync(url); 
+
 	string content = await page.GetContentAsync();
 	var htmlDoc = new HtmlDocument();
 	htmlDoc.LoadHtml(content);
@@ -177,18 +208,16 @@ async Task<List<ChapterInfo>> GetChapterList(string url)
 
 async Task DownloadChapters(ChapterInfo chapter)
 {
-	await new BrowserFetcher().DownloadAsync();
+	// await new BrowserFetcher().DownloadAsync();
 	using var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
 	using var page = await browser.NewPageAsync();
 	await page.GoToAsync(chapter.Url); 
 	
 	string htmlResult = await page.GetContentAsync();
-	
 	var htmlDoc = new HtmlDocument();
 	htmlDoc.LoadHtml(htmlResult);
 	
 	var nodes = htmlDoc.DocumentNode.SelectNodes("//div[@id='imgs']//div[contains(@class, 'wrap_img')]");
-		
 		
 	for (int i = 0; i < nodes?.Count; i++)	
 	{
@@ -209,6 +238,11 @@ async Task DownloadChapters(ChapterInfo chapter)
 /* *************************** */
 
 record Manga(string Name, string Url, string Chapters);
-record MangaInfo(string AltName, string Authors, string Status, string LatestChap, string LastUpdated);
+record MangaInfo(string AltName, string Authors, string Description, string Status, string LatestChap, string LastUpdated);
 record ChapterInfo(int Id, string ChapterName, string Url);
 
+enum Action
+{
+	Continue,
+	Back
+}
